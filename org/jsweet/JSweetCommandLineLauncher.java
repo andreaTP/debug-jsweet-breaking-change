@@ -21,6 +21,7 @@ package org.jsweet;
 import static org.jsweet.transpiler.TranspilationHandler.OUTPUT_LOGGER;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
@@ -72,6 +73,10 @@ import com.martiansoftware.jsap.stringparsers.FileStringParser;
         Force the Java compiler to use a specific encoding (UTF-8, UTF-16, ...).
         (default: UTF-8)
 
+  [--outEncoding <encoding>]
+        Force the generated TypeScript output code for the given encoding (UTF-8, UTF-16, ...).
+        (default: UTF-8)
+
   [--jdkHome <jdkHome>]
         Set the JDK home directory to be used to find the Java compiler. If not
         set, the transpiler will try to use the JAVA_HOME environment variable.
@@ -82,6 +87,13 @@ import com.martiansoftware.jsap.stringparsers.FileStringParser;
         Java files to be transpiled. Java files will be recursively looked up in
         sub-directories. Inclusion and exclusion patterns can be defined with
         the 'includes' and 'excludes' options.
+
+  (--extraInput) input1:input2:...:inputN 
+        An input directory (or column-separated input directories) containing
+        Java source files to help the tranpilation (typically for libraries).
+        Files in these directories will not generate any corresponding TS files 
+        but will help resolving various generation issues (such as default 
+        methods, tricking overloading cases, ...). 
 
   [--includes includes1:includes2:...:includesN ]
         A column-separated list of expressions matching files to be included
@@ -98,7 +110,7 @@ import com.martiansoftware.jsap.stringparsers.FileStringParser;
 
   [--noRootDirectories]
         Skip the root directories (i.e. packages annotated with
-        @jsweet.lang.Root) so that the generated file hierarchy starts at the
+        &#64;jsweet.lang.Root) so that the generated file hierarchy starts at the
         root directories rather than including the entire directory structure.
 
   [--tsout <tsout>]
@@ -124,6 +136,10 @@ import com.martiansoftware.jsap.stringparsers.FileStringParser;
         in d.ts definition files. If this option is not set, the transpiler
         generates d.ts definition files in the directory given by the tsout
         option.
+
+  [--ignoreJavaErrors]
+        Ignore Java compilation errors. Do not use unless you know what you are 
+        doing.
 
   [--declaration]
         Generate the d.ts files along with the js files, so that other programs
@@ -210,16 +226,25 @@ public class JSweetCommandLineLauncher {
 
 	/**
 	 * JSweet transpiler command line entry point. To use the JSweet transpiler
-	 * from Java, see {@link JSweetTranspiler}.
+	 * from Java, see {@link #transpileWithArgs(String[])} or
+	 * {@link JSweetTranspiler}.
 	 */
 	public static void main(String[] args) {
+		System.exit(transpileWithArgs(args));
+	}
+
+	/**
+	 * API entry point with command line arguments (same as the main entry point
+	 * but returns error codes instead of exiting the VM).
+	 */
+	public static int transpileWithArgs(String[] args) {
 		try {
 			JSAP jsapSpec = defineArgs();
 			JSAPResult jsapArgs = parseArgs(jsapSpec, args);
 
 			if (!jsapArgs.success()) {
 				printUsage(jsapSpec);
-				System.exit(-1);
+				return -1;
 			}
 
 			if (jsapArgs.getBoolean("help")) {
@@ -227,11 +252,11 @@ public class JSweetCommandLineLauncher {
 			}
 
 			LogManager.getLogger("org.jsweet").setLevel(Level.WARN);
-			
+
 			if (jsapArgs.getBoolean("verbose")) {
 				LogManager.getLogger("org.jsweet").setLevel(Level.INFO);
 			}
-			
+
 			if (jsapArgs.getBoolean("veryVerbose")) {
 				LogManager.getLogger("org.jsweet").setLevel(Level.ALL);
 			}
@@ -246,9 +271,10 @@ public class JSweetCommandLineLauncher {
 
 		} catch (Throwable t) {
 			t.printStackTrace();
-			System.exit(1);
+			return 1;
 		}
-		System.exit(errorCount > 0 ? 1 : 0);
+		return errorCount > 0 ? 1 : 0;
+
 	}
 
 	private static JSAP defineArgs() throws JSAPException {
@@ -297,6 +323,15 @@ public class JSweetCommandLineLauncher {
 		optionArg.setHelp("Force the Java compiler to use a specific encoding (UTF-8, UTF-16, ...).");
 		jsap.registerParameter(optionArg);
 
+		// Output encoding
+		optionArg = new FlaggedOption("outEncoding");
+		optionArg.setLongFlag("outEncoding");
+		optionArg.setStringParser(JSAP.STRING_PARSER);
+		optionArg.setRequired(false);
+		optionArg.setDefault("UTF-8");
+		optionArg.setHelp("Force the generated TypeScript output code for the given encoding (UTF-8, UTF-16, ...).");
+		jsap.registerParameter(optionArg);
+		
 		// JDK home directory
 		optionArg = new FlaggedOption("jdkHome");
 		optionArg.setLongFlag("jdkHome");
@@ -312,17 +347,27 @@ public class JSweetCommandLineLauncher {
 		optionArg.setLongFlag("input");
 		optionArg.setList(true);
 		optionArg.setStringParser(FileStringParser.getParser());
-		optionArg.setListSeparator(':');
+		optionArg.setListSeparator(File.pathSeparatorChar);
 		optionArg.setRequired(true);
 		optionArg.setHelp(
 				"An input directory (or column-separated input directories) containing Java files to be transpiled. Java files will be recursively looked up in sub-directories. Inclusion and exclusion patterns can be defined with the 'includes' and 'excludes' options.");
+		jsap.registerParameter(optionArg);
+
+		// Extra input directories
+		optionArg = new FlaggedOption("extraInput");
+		optionArg.setLongFlag("extraInput");
+		optionArg.setList(true);
+		optionArg.setStringParser(FileStringParser.getParser());
+		optionArg.setListSeparator(File.pathSeparatorChar);
+		optionArg.setHelp(
+				"An input directory (or column-separated input directories) containing Java source files to help the tranpilation (typically for libraries). Files in these directories will not generate any corresponding TS files but will help resolving various generation issues (such as default methods, tricking overloading cases, ...).");
 		jsap.registerParameter(optionArg);
 
 		// Included files
 		optionArg = new FlaggedOption("includes");
 		optionArg.setLongFlag("includes");
 		optionArg.setList(true);
-		optionArg.setListSeparator(':');
+		optionArg.setListSeparator(File.pathSeparatorChar);
 		optionArg.setHelp(
 				"A column-separated list of expressions matching files to be included (relatively to the input directory).");
 		jsap.registerParameter(optionArg);
@@ -331,7 +376,7 @@ public class JSweetCommandLineLauncher {
 		optionArg = new FlaggedOption("excludes");
 		optionArg.setLongFlag("excludes");
 		optionArg.setList(true);
-		optionArg.setListSeparator(':');
+		optionArg.setListSeparator(File.pathSeparatorChar);
 		optionArg.setHelp(
 				"A column-separated list of expressions matching files to be excluded (relatively to the input directory).");
 		jsap.registerParameter(optionArg);
@@ -342,7 +387,7 @@ public class JSweetCommandLineLauncher {
 		optionArg.setLongFlag("defInput");
 		optionArg.setList(true);
 		optionArg.setStringParser(FileStringParser.getParser());
-		optionArg.setListSeparator(':');
+		optionArg.setListSeparator(File.pathSeparatorChar);
 		optionArg.setRequired(false);
 		optionArg.setHelp(
 				"An input directory (or column-separated input directories) containing TypeScript definition files (*.d.ts) to be used for transpilation. Definition files will be recursively looked up in sub-diredctories.");
@@ -395,6 +440,12 @@ public class JSweetCommandLineLauncher {
 				"Ignore definitions from def.* packages, so that they are not generated in d.ts definition files. If this option is not set, the transpiler generates d.ts definition files in the directory given by the tsout option.");
 		jsap.registerParameter(switchArg);
 
+		switchArg = new Switch("ignoreJavaErrors");
+		switchArg.setLongFlag("ignoreJavaErrors");
+		switchArg.setHelp(
+				"Ignore Java compilation errors. Do not use unless you know what you are doing.");
+		jsap.registerParameter(switchArg);
+		
 		// Generates declarations
 		switchArg = new Switch("declaration");
 		switchArg.setLongFlag("declaration");
@@ -574,13 +625,18 @@ public class JSweetCommandLineLauncher {
 
 		private JSAPResult jsapArgs;
 		private List<File> inputDirList;
+		private List<File> extraInputDirList;
 		private LinkedList<File> javaInputFiles;
+		private LinkedList<File> extraJavaInputFiles;
 
 		public JSweetTranspilationTask(JSAPResult jsapArgs) {
 			this.jsapArgs = jsapArgs;
-			inputDirList = Arrays.asList(jsapArgs.getFileArray("input"));
+			inputDirList = new ArrayList<File>();
+			inputDirList.addAll(Arrays.asList(jsapArgs.getFileArray("input")));
+			if (jsapArgs.userSpecified("extraInput")) {
+				extraInputDirList = Arrays.asList(jsapArgs.getFileArray("extraInput"));
+			}
 			logger.info("input dirs: " + inputDirList);
-
 		}
 
 		@Override
@@ -627,6 +683,29 @@ public class JSweetCommandLineLauncher {
 						return false;
 					}, inputDir, javaInputFiles);
 				}
+
+				extraJavaInputFiles = new LinkedList<File>();
+
+				if (extraInputDirList != null) {
+					for (File inputDir : extraInputDirList) {
+						Util.addFiles(f -> {
+							String path = inputDir.toURI().relativize(f.toURI()).getPath();
+							if (path.endsWith(".java")) {
+								if (includedPatterns == null || includedPatterns.isEmpty() || includedPatterns != null
+										&& includedPatterns.stream().anyMatch(p -> p.matcher(path).matches())) {
+									if (excludedPatterns != null && !excludedPatterns.isEmpty()
+											&& excludedPatterns.stream().anyMatch(p -> p.matcher(path).matches())) {
+										return false;
+									}
+									return true;
+								}
+							}
+							return false;
+						}, inputDir, extraJavaInputFiles);
+					}
+				}
+
+				javaInputFiles.addAll(extraJavaInputFiles);
 
 				File tsOutputDir = null;
 				if (jsapArgs.userSpecified("tsout") && jsapArgs.getFile("tsout") != null) {
@@ -706,6 +785,9 @@ public class JSweetCommandLineLauncher {
 				if (jsapArgs.userSpecified("encoding")) {
 					transpiler.setEncoding(jsapArgs.getString("encoding"));
 				}
+				if (jsapArgs.userSpecified("outEncoding")) {
+					transpiler.setOutEncoding(jsapArgs.getString("outEncoding"));
+				}
 				if (jsapArgs.userSpecified("enableAssertions")) {
 					transpiler.setIgnoreAssertions(!jsapArgs.getBoolean("enableAssertions"));
 				}
@@ -717,6 +799,9 @@ public class JSweetCommandLineLauncher {
 				}
 				if (jsapArgs.userSpecified("ignoreDefinitions")) {
 					transpiler.setGenerateDefinitions(!jsapArgs.getBoolean("ignoreDefinitions"));
+				}
+				if (jsapArgs.userSpecified("ignoreJavaErrors")) {
+					transpiler.setIgnoreJavaErrors(jsapArgs.getBoolean("ignoreJavaErrors"));
 				}
 				if (jsapArgs.userSpecified("dtsOutputDir")) {
 					transpiler.setDeclarationsOutputDir(dtsOutputDir);
@@ -751,7 +836,8 @@ public class JSweetCommandLineLauncher {
 					transpiler.addTsDefDir(f);
 				}
 
-				transpiler.transpile(transpilationHandler, SourceFile.toSourceFiles(javaInputFiles));
+				transpiler.transpile(transpilationHandler, extraJavaInputFiles.stream().map(f -> f.toString())
+						.collect(Collectors.toSet()), SourceFile.toSourceFiles(javaInputFiles));
 			} catch (NoClassDefFoundError error) {
 				transpilationHandler.report(JSweetProblem.JAVA_COMPILER_NOT_FOUND, null,
 						JSweetProblem.JAVA_COMPILER_NOT_FOUND.getMessage());
