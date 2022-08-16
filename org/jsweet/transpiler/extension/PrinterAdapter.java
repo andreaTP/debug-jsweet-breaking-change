@@ -32,6 +32,7 @@ import javax.lang.model.element.Name;
 import javax.lang.model.element.PackageElement;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.element.TypeParameterElement;
+import javax.lang.model.element.VariableElement;
 import javax.lang.model.type.DeclaredType;
 import javax.lang.model.type.TypeMirror;
 import javax.lang.model.util.Types;
@@ -57,6 +58,7 @@ import org.jsweet.transpiler.model.NewClassElement;
 import org.jsweet.transpiler.model.UnaryOperatorElement;
 import org.jsweet.transpiler.model.Util;
 import org.jsweet.transpiler.model.VariableAccessElement;
+import org.jsweet.transpiler.model.support.CompilationUnitElementSupport;
 import org.jsweet.transpiler.model.support.ExtendedElementSupport;
 import org.jsweet.transpiler.model.support.MethodInvocationElementSupport;
 import org.jsweet.transpiler.model.support.UtilSupport;
@@ -93,8 +95,15 @@ public class PrinterAdapter {
 	}
 
 	/**
-	 * Creates a new adapter that will try delegate to the given parent adapter when
-	 * not implementing its own behavior.
+	 * Returns the current compilation unit.
+	 */
+	public CompilationUnitElement getCompilationUnit() {
+		return new CompilationUnitElementSupport(printer.getCompilationUnit());
+	}
+
+	/**
+	 * Creates a new adapter that will try delegate to the given parent adapter
+	 * when not implementing its own behavior.
 	 * 
 	 * @param parentAdapter
 	 *            cannot be null: if no parent you must use the
@@ -123,21 +132,43 @@ public class PrinterAdapter {
 	}
 
 	/**
-	 * Adds a type mapping so that this adapter substitutes the source type with the
-	 * target type during the transpilation process.
+	 * This hook is called when the transpilation starts. Overloads must call
+	 * super to forward this hook to the adapters chain.
+	 */
+	public void onTranspilationStarted() {
+		if (getParentAdapter() != null) {
+			getParentAdapter().onTranspilationStarted();
+		}
+	}
+
+	/**
+	 * This hook is called when the transpilation finishes. Overloads must call
+	 * super to forward this hook to the adapters chain.
+	 */
+	public void onTranspilationFinished() {
+		if (getParentAdapter() != null) {
+			getParentAdapter().onTranspilationFinished();
+		}
+	}
+
+	/**
+	 * Adds a type mapping so that this adapter substitutes the source type with
+	 * the target type during the transpilation process.
 	 * 
 	 * @param sourceTypeName
 	 *            the fully qualified name of the type to be substituted
 	 * @param targetTypeName
-	 *            the fully Qualified name of the type the source type is mapped to
+	 *            the fully Qualified name of the type the source type is mapped
+	 *            to
 	 */
 	protected final void addTypeMapping(String sourceTypeName, String targetTypeName) {
 		context.addTypeMapping(sourceTypeName, targetTypeName);
 	}
 
 	/**
-	 * Adds a set of name-based type mappings. This method is equivalent to calling
-	 * {@link #addTypeMapping(String, String)} for each entry of the given map.
+	 * Adds a set of name-based type mappings. This method is equivalent to
+	 * calling {@link #addTypeMapping(String, String)} for each entry of the
+	 * given map.
 	 */
 	protected final void addTypeMappings(Map<String, String> nameMappings) {
 		context.addTypeMappings(nameMappings);
@@ -173,17 +204,17 @@ public class PrinterAdapter {
 	 * with a target type during the transpilation process.
 	 * 
 	 * @param mappingFunction
-	 *            a function that takes the type tree, the type name, and returns a
-	 *            substitution (either under the form of a string, or of a string,
-	 *            or of another type tree).
+	 *            a function that takes the type tree, the type name, and
+	 *            returns a substitution (either under the form of a string, or
+	 *            of a string, or of another type tree).
 	 */
 	public void addTypeMapping(BiFunction<ExtendedElement, String, Object> mappingFunction) {
 		context.addTypeMapping(mappingFunction);
 	}
 
 	/**
-	 * Gets the string that corresponds to the given type, taking into account all
-	 * type mappings.
+	 * Gets the string that corresponds to the given type, taking into account
+	 * all type mappings.
 	 * 
 	 * <p>
 	 * Some type mappings are set by default, some are added in the context by
@@ -245,15 +276,16 @@ public class PrinterAdapter {
 	 * </pre>
 	 * 
 	 * <p>
-	 * Filters are simplified regular expressions matching on the Java AST. Special
-	 * characters are the following:
+	 * Filters are simplified regular expressions matching on the Java AST.
+	 * Special characters are the following:
 	 * 
 	 * <ul>
-	 * <li>*: matches any token/identifier in the signature of the AST element</li>
-	 * <li>**: matches any list of tokens in signature of the AST element (same as
-	 * ..)</li>
-	 * <li>..: matches any list of tokens in signature of the AST element (same as
-	 * **)</li>
+	 * <li>*: matches any token/identifier in the signature of the AST element
+	 * </li>
+	 * <li>**: matches any list of tokens in signature of the AST element (same
+	 * as ..)</li>
+	 * <li>..: matches any list of tokens in signature of the AST element (same
+	 * as **)</li>
 	 * <li>!: negates the filter (first character only)</li>
 	 * </ul>
 	 * 
@@ -283,9 +315,9 @@ public class PrinterAdapter {
 	/**
 	 * Adds an annotation on the AST through global filters.
 	 * 
-	 * The annotation to be added is described by its type and by a value, which is
-	 * passed as is to the annotation's value. If the annotation type does not
-	 * accept a value parameter, no annotations will be added.
+	 * The annotation to be added is described by its type and by a value, which
+	 * is passed as is to the annotation's value. If the annotation type does
+	 * not accept a value parameter, no annotations will be added.
 	 * 
 	 * @see #addAnnotation(String, String...)
 	 */
@@ -295,8 +327,8 @@ public class PrinterAdapter {
 	}
 
 	/**
-	 * Adds an annotation manager that will tune (add or remove) annotations on the
-	 * AST. Lastly added managers have precedence over firstly added ones.
+	 * Adds an annotation manager that will tune (add or remove) annotations on
+	 * the AST. Lastly added managers have precedence over firstly added ones.
 	 */
 	public final void addAnnotationManager(AnnotationManager annotationManager) {
 		context.addAnnotationManager(annotationManager);
@@ -315,8 +347,8 @@ public class PrinterAdapter {
 	}
 
 	/**
-	 * Gets the first value of the 'value' property for the given annotation type if
-	 * found on the given element.
+	 * Gets the first value of the 'value' property for the given annotation
+	 * type if found on the given element.
 	 * 
 	 * To change the behavior of this method in a composable way, use
 	 * {@link #addAnnotation(Class, String...)} or
@@ -340,16 +372,16 @@ public class PrinterAdapter {
 	}
 
 	/**
-	 * Gets the first value of the given property for the given annotation type if
-	 * found on the given element.
+	 * Gets the first value of the given property for the given annotation type
+	 * if found on the given element.
 	 * 
 	 * @param element
 	 *            the element holding the annotation
 	 * @param annotationType
 	 *            the fully qualified name of the value property type
 	 * @param propertyName
-	 *            the name of the property in the annotation (<code>null</code> will
-	 *            look up the <code>value</code> property)
+	 *            the name of the property in the annotation (<code>null</code>
+	 *            will look up the <code>value</code> property)
 	 * @param propertyClass
 	 *            the expected class of the property (String.class,
 	 *            TypeMirror.class, Number.class, and arrays such as
@@ -375,8 +407,8 @@ public class PrinterAdapter {
 	 * </pre>
 	 * 
 	 * <p>
-	 * Filters are simplified regular expressions matching on the Java AST. Special
-	 * characters are the following:
+	 * Filters are simplified regular expressions matching on the Java AST.
+	 * Special characters are the following:
 	 * 
 	 * <ul>
 	 * <li>*: matches any character in the signature of the AST element</li>
@@ -385,8 +417,8 @@ public class PrinterAdapter {
 	 * 
 	 * @param annotationDescriptor
 	 *            the annotation type name, optionally preceded with a @, and
-	 *            optionally defining a value (fully qualified name is not necessary
-	 *            for JSweet annotations)
+	 *            optionally defining a value (fully qualified name is not
+	 *            necessary for JSweet annotations)
 	 * @param filters
 	 *            the annotation is activated if one of the filters match and no
 	 *            negative filter matches
@@ -688,6 +720,25 @@ public class PrinterAdapter {
 	}
 
 	/**
+	 * Substitutes an assigned expression if necessary.
+	 * <p>
+	 * Expressions are assigned to a type when used in an assignment expression
+	 * (=) or as function arguments. JSweet implements a default behavior to
+	 * adapt the expression when necessary (for instance to implement implicit
+	 * type conversion that would be necessary in TypeScript). One can override
+	 * or extend the default behavior by overriding this method.
+	 * 
+	 * @param type
+	 *            the type the expression is being assigned to
+	 * @param assignedExpression
+	 *            the assigned expression
+	 * @return true if the expression has been substituted
+	 */
+	public boolean substituteAssignedExpression(TypeMirror type, ExtendedElement assignedExpression) {
+		return parentAdapter == null ? false : parentAdapter.substituteAssignedExpression(type, assignedExpression);
+	}
+
+	/**
 	 * Upcalled by the transpiler to forward to the right subtitution method
 	 * depending on the actual extended element type.
 	 */
@@ -710,7 +761,19 @@ public class PrinterAdapter {
 	 */
 	public boolean substituteVariableAccess(VariableAccessElement variableAccess) {
 		return parentAdapter == null ? false : parentAdapter.substituteVariableAccess(variableAccess);
+	}
 
+	/**
+	 * Called if the initializer of a variable is undefined (in order to force a
+	 * default value).
+	 * 
+	 * @param variable
+	 *            the variable to return an initializer for
+	 * @return an initializer expression, null to keep undefined
+	 */
+	public String getVariableInitialValue(VariableElement variable) {
+		return parentAdapter == null ? util().getTypeInitialValue(variable.asType())
+				: parentAdapter.getVariableInitialValue(variable);
 	}
 
 	/**
@@ -732,8 +795,8 @@ public class PrinterAdapter {
 	}
 
 	/**
-	 * This method implements the default behavior to generate module imports. It
-	 * may be overridden by subclasses to implement specific behaviors.
+	 * This method implements the default behavior to generate module imports.
+	 * It may be overridden by subclasses to implement specific behaviors.
 	 * 
 	 * @param currentCompilationUnit
 	 *            the currently transpiled compilation unit
@@ -746,37 +809,43 @@ public class PrinterAdapter {
 	 */
 	public ModuleImportDescriptor getModuleImportDescriptor(CompilationUnitElement currentCompilationUnit,
 			String importedName, TypeElement importedClass) {
-		if (util().isSourceElement(importedClass)
-				&& !importedClass.getQualifiedName().toString().startsWith(JSweetConfig.LIBS_PACKAGE + ".")) {
-			String importedModule = util().getSourceFilePath(importedClass);
-			if (importedModule.equals(currentCompilationUnit.getSourceFilePath())) {
-				return null;
-			}
-			Element parent = importedClass.getEnclosingElement();
-			while (!(parent instanceof PackageSymbol)) {
-				importedName = parent.getSimpleName().toString();
-				parent = parent.getEnclosingElement();
-			}
-			while (importedClass.getEnclosingElement() instanceof ClassSymbol) {
-				importedClass = (ClassSymbol) importedClass.getEnclosingElement();
-			}
-
-			if (parent != null && !hasAnnotationType(importedClass, JSweetConfig.ANNOTATION_ERASED)) {
-				// '@' represents a common root in case there is no common root
-				// package => pathToImportedClass cannot be null because of the
-				// common '@' root
-				String pathToImportedClass = util().getRelativePath(
-						"@/" + currentCompilationUnit.getPackage().toString().replace('.', '/'),
-						"@/" + importedClass.toString().replace('.', '/'));
-				if (!pathToImportedClass.startsWith(".")) {
-					pathToImportedClass = "./" + pathToImportedClass;
+		if (parentAdapter != null) {
+			return parentAdapter.getModuleImportDescriptor(currentCompilationUnit, importedName, importedClass);
+		} else {
+			if (util().isSourceElement(importedClass)
+					&& !importedClass.getQualifiedName().toString().startsWith(JSweetConfig.LIBS_PACKAGE + ".")) {
+				String importedModule = util().getSourceFilePath(importedClass);
+				if (importedModule.equals(currentCompilationUnit.getSourceFilePath())) {
+					return null;
+				}
+				Element parent = importedClass.getEnclosingElement();
+				while (!(parent instanceof PackageSymbol)) {
+					importedName = parent.getSimpleName().toString();
+					parent = parent.getEnclosingElement();
+				}
+				while (importedClass.getEnclosingElement() instanceof ClassSymbol) {
+					importedClass = (ClassSymbol) importedClass.getEnclosingElement();
 				}
 
-				return new ModuleImportDescriptor((PackageElement) parent, importedName,
-						pathToImportedClass.replace('\\', '/'));
+				if (parent != null && !hasAnnotationType(importedClass, JSweetConfig.ANNOTATION_ERASED)) {
+					// '@' represents a common root in case there is no common
+					// root
+					// package => pathToImportedClass cannot be null because of
+					// the
+					// common '@' root
+					String pathToImportedClass = util().getRelativePath(
+							"@/" + currentCompilationUnit.getPackage().toString().replace('.', '/'),
+							"@/" + importedClass.toString().replace('.', '/'));
+					if (!pathToImportedClass.startsWith(".")) {
+						pathToImportedClass = "./" + pathToImportedClass;
+					}
+
+					return new ModuleImportDescriptor(false, (PackageElement) parent, importedName,
+							pathToImportedClass.replace('\\', '/'), importedClass);
+				}
 			}
+			return null;
 		}
-		return null;
 
 	}
 
@@ -791,6 +860,39 @@ public class PrinterAdapter {
 		return parentAdapter == null ? false : parentAdapter.substituteMethodInvocation(invocation);
 	}
 
+	/**
+	 * Substitutes a given type declaration.
+	 * 
+	 * @param type
+	 *            the type being printed
+	 * @return true if substituted
+	 */
+	public boolean substituteType(TypeElement type) {
+		return parentAdapter == null ? false : parentAdapter.substituteType(type);
+	}
+
+	/**
+	 * Substitutes a given executable declaration.
+	 * 
+	 * @param executable
+	 *            the executable being printed
+	 * @return true if substituted
+	 */
+	public boolean substituteExecutable(ExecutableElement executable) {
+		return parentAdapter == null ? false : parentAdapter.substituteExecutable(executable);
+	}
+
+	/**
+	 * Substitutes a given variable declaration.
+	 * 
+	 * @param variable
+	 *            the variable being printed
+	 * @return true if substituted
+	 */
+	public boolean substituteVariable(VariableElement variable) {
+		return parentAdapter == null ? false : parentAdapter.substituteVariable(variable);
+	}
+	
 	/**
 	 * Substitutes the value of a <em>field assignment</em> expression.
 	 * 
@@ -817,16 +919,17 @@ public class PrinterAdapter {
 	 * Gets the printer on which rely the adapter (this is not recommended).
 	 * 
 	 * <p>
-	 * Accessing the printer with this method allows the user to access the internal
-	 * javac API directly ({@link com.sun.tools.javac}), which is non-standard and
-	 * may get deprecated in future Java versions. As a consequence, to write
-	 * sustainable adapters, it is not recommended to use the printer API.
+	 * Accessing the printer with this method allows the user to access the
+	 * internal javac API directly ({@link com.sun.tools.javac}), which is
+	 * non-standard and may get deprecated in future Java versions. As a
+	 * consequence, to write sustainable adapters, it is not recommended to use
+	 * the printer API.
 	 * 
 	 * <p>
-	 * Instead, use the adapter's API directly, which relies on an abstraction of
-	 * the AST: {@link javax.lang.model} and {@link org.jsweet.transpiler.model}. If
-	 * some feature seems to be missing, please contact JSweet.org to help improving
-	 * this API.
+	 * Instead, use the adapter's API directly, which relies on an abstraction
+	 * of the AST: {@link javax.lang.model} and
+	 * {@link org.jsweet.transpiler.model}. If some feature seems to be missing,
+	 * please contact JSweet.org to help improving this API.
 	 */
 	public AbstractTreePrinter getPrinter() {
 		return printer;
@@ -873,10 +976,34 @@ public class PrinterAdapter {
 	}
 
 	/**
+	 * Manually substitutes the super class of a given type.
+	 * <p/>
+	 * This method should print " extends X" and return true to force the
+	 * substitution of the extends clause of a given class. This is a low-level
+	 * operation and it is not encouraged to use it except for very specific
+	 * contexts.
+	 */
+	public boolean substituteExtends(TypeElement type) {
+		return parentAdapter == null ? false : parentAdapter.substituteExtends(type);
+	}
+
+	/**
 	 * Tells if a super interface has to be erased in the generated source.
 	 */
 	public boolean eraseSuperInterface(TypeElement type, TypeElement superInterface) {
 		return parentAdapter == null ? false : parentAdapter.eraseSuperInterface(type, superInterface);
+	}
+
+	/**
+	 * Manually substitutes the super interfaces of a given type.
+	 * <p/>
+	 * This method should print " implements X,Y,Z" and return true to force the
+	 * substitution of the implements clause of a given class. This is a
+	 * low-level operation and it is not encouraged to use it except for very
+	 * specific contexts.
+	 */
+	public boolean substituteImplements(TypeElement type) {
+		return parentAdapter == null ? false : parentAdapter.substituteImplements(type);
 	}
 
 	/**
@@ -916,6 +1043,15 @@ public class PrinterAdapter {
 	public void afterType(TypeElement type) {
 		if (parentAdapter != null) {
 			parentAdapter.afterType(type);
+		}
+	}
+
+	/**
+	 * This method is called before starting printing the body of a type.
+	 */
+	public void beforeTypeBody(TypeElement type) {
+		if (parentAdapter != null) {
+			parentAdapter.beforeTypeBody(type);
 		}
 	}
 
@@ -984,8 +1120,8 @@ public class PrinterAdapter {
 	}
 
 	/**
-	 * Tells if the given element is ambient (part of a def.* package or within an
-	 * <code>@Ambient</code>-annotated scope).
+	 * Tells if the given element is ambient (part of a def.* package or within
+	 * an <code>@Ambient</code>-annotated scope).
 	 */
 	public final boolean isAmbientDeclaration(Element element) {
 		return context.isAmbientDeclaration((com.sun.tools.javac.code.Symbol) element);
@@ -999,20 +1135,21 @@ public class PrinterAdapter {
 	}
 
 	/**
-	 * This method sets a header to the currently printed file. This header can be
-	 * TypeScript code, but use with caution since it may raise compilation errors.
+	 * This method sets a header to the currently printed file. This header can
+	 * be TypeScript code, but use with caution since it may raise compilation
+	 * errors.
 	 * 
 	 * <p>
-	 * Several headers can be added to the same file. Note that a new line will be
-	 * automatically added at the end of the last header (if any), but not between
-	 * each header. Headers will be printer in the order they have been added to the
-	 * file. Headers are reset for each new file.
+	 * Several headers can be added to the same file. Note that a new line will
+	 * be automatically added at the end of the last header (if any), but not
+	 * between each header. Headers will be printer in the order they have been
+	 * added to the file. Headers are reset for each new file.
 	 * 
 	 * @param key
 	 *            a key to identify the header (see {@link #getHeader(String)})
 	 * @param header
-	 *            any string that will be printed at the beginning of the file (only
-	 *            when not in bundle mode)
+	 *            any string that will be printed at the beginning of the file
+	 *            (only when not in bundle mode)
 	 * 
 	 * @see #getHeader(String)
 	 */

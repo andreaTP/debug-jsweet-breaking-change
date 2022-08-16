@@ -19,6 +19,7 @@
 package org.jsweet.transpiler.extension;
 
 import static org.jsweet.JSweetConfig.ANNOTATION_ERASED;
+import static org.jsweet.JSweetConfig.ANNOTATION_KEEP_USES;
 import static org.jsweet.JSweetConfig.ANNOTATION_OBJECT_TYPE;
 import static org.jsweet.JSweetConfig.ANNOTATION_STRING_TYPE;
 import static org.jsweet.JSweetConfig.DEPRECATED_UTIL_CLASSNAME;
@@ -82,6 +83,7 @@ import org.jsweet.transpiler.JSweetProblem;
 import org.jsweet.transpiler.JSweetTranspiler;
 import org.jsweet.transpiler.Java2TypeScriptTranslator;
 import org.jsweet.transpiler.Java2TypeScriptTranslator.ComparisonMode;
+import org.jsweet.transpiler.ModuleImportDescriptor;
 import org.jsweet.transpiler.TypeChecker;
 import org.jsweet.transpiler.model.ExtendedElement;
 import org.jsweet.transpiler.model.ForeachLoopElement;
@@ -135,7 +137,8 @@ public class Java2TypeScriptAdapter extends PrinterAdapter {
 	/**
 	 * Creates a root adapter (with no parent).
 	 *
-	 * @param context the transpilation context
+	 * @param context
+	 *            the transpilation context
 	 */
 	public Java2TypeScriptAdapter(JSweetContext context) {
 		super(context);
@@ -143,12 +146,12 @@ public class Java2TypeScriptAdapter extends PrinterAdapter {
 	}
 
 	/**
-	 * Creates a new adapter that will try delegate to the given parent adapter when
-	 * not implementing its own behavior.
+	 * Creates a new adapter that will try delegate to the given parent adapter
+	 * when not implementing its own behavior.
 	 *
-	 * @param parentAdapter cannot be null: if no parent you must use the
-	 *                      {@link #AbstractPrinterAdapter(JSweetContext)}
-	 *                      constructor
+	 * @param parentAdapter
+	 *            cannot be null: if no parent you must use the
+	 *            {@link #AbstractPrinterAdapter(JSweetContext)} constructor
 	 */
 	public Java2TypeScriptAdapter(PrinterAdapter parent) {
 		super(parent);
@@ -344,9 +347,37 @@ public class Java2TypeScriptAdapter extends PrinterAdapter {
 		}
 	}
 
+	private boolean substituteUnresolvedMethodInvocation(JCMethodInvocation invocation) {
+		// this is a patch that should be removed when Class.isInstance gets
+		// supported by J4TS
+		if (invocation.meth instanceof JCFieldAccess) {
+			JCFieldAccess fieldAccess = (JCFieldAccess) invocation.meth;
+			String methName = fieldAccess.name.toString();
+			String typeName = fieldAccess.selected.type != null && fieldAccess.selected.type.tsym != null
+					? fieldAccess.selected.type.tsym.toString() : null;
+			if (typeName != null && "isInstance".equals(methName) && Class.class.getName().equals(typeName)) {
+				printMacroName(fieldAccess.toString());
+				print("((c:any,o:any) => { if(typeof c === 'string') return (o.constructor && o.constructor")
+						.print("[\"" + Java2TypeScriptTranslator.INTERFACES_FIELD_NAME + "\"] && o.constructor")
+						.print("[\"" + Java2TypeScriptTranslator.INTERFACES_FIELD_NAME + "\"].indexOf(c) >= 0) || (o")
+						.print("[\"" + Java2TypeScriptTranslator.INTERFACES_FIELD_NAME + "\"] && o")
+						.print("[\"" + Java2TypeScriptTranslator.INTERFACES_FIELD_NAME
+								+ "\"].indexOf(c) >= 0); else if(typeof c === 'function') return (o instanceof c) || (o.constructor && o.constructor === c); })(");
+				getPrinter().print(fieldAccess.selected).print(",").print(invocation.args.head).print(")");
+				return true;
+			}
+		}
+		print("/*unresolved method*/");
+		getPrinter().printDefaultMethodInvocation(invocation);
+		return true;
+	}
+
 	@Override
 	public boolean substituteMethodInvocation(MethodInvocationElement invocationElement) {
-
+		if (invocationElement.getMethod() == null && context.options.isIgnoreJavaErrors()) {
+			// may happen if the method is not available
+			return substituteUnresolvedMethodInvocation(((MethodInvocationElementSupport) invocationElement).getTree());
+		}
 		Element targetType = invocationElement.getMethod().getEnclosingElement();
 		// This is some sort of hack to avoid invoking erased methods.
 		// If the containing class is erased, we still invoke it because we
@@ -357,8 +388,9 @@ public class Java2TypeScriptAdapter extends PrinterAdapter {
 		// So, we should probably find a better way to erase invocations (or at
 		// least do it conditionally).
 		if (hasAnnotationType(invocationElement.getMethod(), ANNOTATION_ERASED)
+				&& !hasAnnotationType(invocationElement.getMethod(), ANNOTATION_KEEP_USES)
 				&& !isAmbientDeclaration(invocationElement.getMethod())) {
-			print("null");
+			print("null/*erased method " + ((MethodInvocationElementSupport) invocationElement).getTree().meth + "*/");
 			return true;
 		}
 		if (invocationElement.getTargetExpression() != null) {
@@ -428,6 +460,12 @@ public class Java2TypeScriptAdapter extends PrinterAdapter {
 				print(relTarget).print("[").print(relTarget).print("[").print(invocationElement.getTargetExpression())
 						.print("]").print("]");
 				return true;
+			case "values":
+				printMacroName("Enum." + targetMethodName);
+				print("function() { " + VAR_DECL_KEYWORD + " result: number[] = []; for(" + VAR_DECL_KEYWORD
+						+ " val in ").print(relTarget).print(
+								") { if(!isNaN(<any>val)) { result.push(parseInt(val,10)); } } return result; }()");
+				return true;
 			case "valueOf":
 				printMacroName("Enum." + targetMethodName);
 				if (invocationElement.getArgumentCount() == 1) {
@@ -436,16 +474,20 @@ public class Java2TypeScriptAdapter extends PrinterAdapter {
 					return true;
 				}
 				break;
-			case "values":
-				printMacroName("Enum." + targetMethodName);
-				print("function() { " + VAR_DECL_KEYWORD + " result: number[] = []; for(" + VAR_DECL_KEYWORD
-						+ " val in ").print(relTarget).print(
-								") { if(!isNaN(<any>val)) { result.push(parseInt(val,10)); } } return result; }()");
-				return true;
 			case "equals":
 				printMacroName("Enum." + targetMethodName);
 				print("(<any>(").print(invocationElement.getTargetExpression()).print(") === <any>(")
 						.print(invocationElement.getArgument(0)).print("))");
+				return true;
+			case "compareTo":
+				printMacroName("Enum." + targetMethodName);
+				print("(<number>(").print(invocationElement.getTargetExpression()).print(") - <number>(")
+						.print(invocationElement.getArgument(0)).print("))");
+				return true;
+			case "getClass":
+			case "getDeclaringClass":
+				printMacroName("Enum." + targetMethodName);
+				print(relTarget);
 				return true;
 			}
 			// enum objets wrapping
@@ -455,6 +497,14 @@ public class Java2TypeScriptAdapter extends PrinterAdapter {
 							.print(Java2TypeScriptTranslator.ENUM_WRAPPER_CLASS_SUFFIX + ".")
 							.print(invocationElement.getMethodName()).print("(")
 							.printArgList(invocationElement.getArguments()).print(")");
+
+					ModuleImportDescriptor moduleImport = getModuleImportDescriptor(getCompilationUnit(),
+							invocationElement.getTargetExpression().toString()
+									+ Java2TypeScriptTranslator.ENUM_WRAPPER_CLASS_SUFFIX,
+							(TypeElement) invocationElement.getTargetExpression().getTypeAsElement());
+					if (moduleImport != null) {
+						getPrinter().useModule(moduleImport);
+					}
 					return true;
 				}
 			}
@@ -462,6 +512,19 @@ public class Java2TypeScriptAdapter extends PrinterAdapter {
 					.print(invocationElement.getTargetExpression()).print("].").print(invocationElement.getMethodName())
 					.print("(").printArgList(invocationElement.getArguments()).print(")");
 			return true;
+		}
+
+		// enum static methods
+		if (targetType != null && targetType.getKind() == ElementKind.ENUM) {
+			String relTarget = getRootRelativeName((Symbol) targetType);
+			switch (targetMethodName) {
+			case "values":
+				printMacroName("Enum." + targetMethodName);
+				print("function() { " + VAR_DECL_KEYWORD + " result: number[] = []; for(" + VAR_DECL_KEYWORD
+						+ " val in ").print(relTarget).print(
+								") { if(!isNaN(<any>val)) { result.push(parseInt(val,10)); } } return result; }()");
+				return true;
+			}
 		}
 
 		if (targetClassName != null && targetMethodName != null) {
@@ -829,10 +892,22 @@ public class Java2TypeScriptAdapter extends PrinterAdapter {
 					&& TypeChecker.FORBIDDEN_JDK_FUNCTIONAL_METHODS.contains(targetMethodName)) {
 				report(invocationElement, JSweetProblem.JDK_METHOD, targetMethodName);
 			}
+
+			if (targetClassName.equals(Function.class.getName()) && targetMethodName.equals("identity")) {
+				print("(x=>x)");
+				return true;
+			}
+
 			printFunctionalInvocation(invocationElement.getTargetExpression(), targetMethodName,
 					invocationElement.getArguments());
 			return true;
 		}
+		if (context.isFunctionalType(targetType)) {
+			printFunctionalInvocation2(invocationElement.getTargetExpression(), targetMethodName,
+					invocationElement.getArguments());
+			return true;
+		}
+
 		if (invocationElement.getTargetExpression() != null && targetClassName != null
 				&& targetClassName.equals(java.lang.Runnable.class.getName())) {
 			printFunctionalInvocation(invocationElement.getTargetExpression(), targetMethodName,
@@ -1310,6 +1385,12 @@ public class Java2TypeScriptAdapter extends PrinterAdapter {
 		}
 	}
 
+	protected void printFunctionalInvocation2(ExtendedElement target, String functionName,
+			List<ExtendedElement> arguments) {
+		print("((target => (target['" + functionName + "'] === undefined)?target:target['" + functionName + "'])(")
+				.print(target).print("))").print("(").printArgList(arguments).print(")");
+	}
+
 	protected final PrinterAdapter printTarget(ExtendedElement target) {
 		if (target == null) {
 			return print("this");
@@ -1351,7 +1432,8 @@ public class Java2TypeScriptAdapter extends PrinterAdapter {
 	}
 
 	/**
-	 * @param enclosingElement is required for functional (ie dynamic) type mappings
+	 * @param enclosingElement
+	 *            is required for functional (ie dynamic) type mappings
 	 */
 	public boolean substituteAndPrintType(ExtendedElement enclosingElement, TypeElement type) {
 		String typeFullName = type.toString();
@@ -1461,6 +1543,7 @@ public class Java2TypeScriptAdapter extends PrinterAdapter {
 				delegateToEmulLayer(accessedType, variableAccess);
 				return true;
 			}
+
 		} else {
 			if (JSweetConfig.UTIL_CLASSNAME.equals(variableAccess.getTargetElement().toString())) {
 				if ("$this".equals(variableAccess.getVariableName())) {

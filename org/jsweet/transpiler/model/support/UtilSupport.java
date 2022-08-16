@@ -18,15 +18,22 @@
  */
 package org.jsweet.transpiler.model.support;
 
+import java.util.List;
+
 import javax.lang.model.element.Element;
 import javax.lang.model.element.TypeElement;
 import javax.lang.model.type.DeclaredType;
+import javax.lang.model.type.TypeKind;
 import javax.lang.model.type.TypeMirror;
 
 import org.jsweet.transpiler.JSweetContext;
 import org.jsweet.transpiler.model.Util;
 
+import com.sun.tools.javac.code.Symbol.TypeSymbol;
 import com.sun.tools.javac.code.Type;
+import com.sun.tools.javac.code.Type.CapturedType;
+import com.sun.tools.javac.tree.JCTree;
+import com.sun.tools.javac.tree.JCTree.JCCompilationUnit;
 
 /**
  * See {@link Util}.
@@ -50,6 +57,24 @@ public class UtilSupport implements Util {
 			}
 		}
 		return type.toString();
+	}
+
+	@Override
+	public TypeMirror getUpperBound(TypeMirror type) {
+		if (type instanceof CapturedType && ((CapturedType) type).bound != null) {
+			return ((CapturedType) type).bound;
+		} else {
+			return type;
+		}
+	}
+
+	@Override
+	public List<? extends TypeMirror> getTypeArguments(TypeMirror type) {
+		if (type instanceof DeclaredType) {
+			return ((DeclaredType) type).getTypeArguments();
+		} else {
+			return null;
+		}
 	}
 
 	@Override
@@ -100,6 +125,30 @@ public class UtilSupport implements Util {
 	}
 
 	@Override
+	public TypeMirror getType(String fullyQualifiedName) {
+		TypeMirror result = null;
+		try {
+			Class<?> clazz = Class.forName(fullyQualifiedName);
+			result = getType(clazz);
+			if (result != null) {
+				return result;
+			}
+		} catch (Exception e) {
+			// swallow
+		}
+		for (JCCompilationUnit cu : context.compilationUnits) {
+			for (JCTree t : cu.getTypeDecls()) {
+				if (t.type.asElement() instanceof TypeElement) {
+					if (t.type.asElement().toString().equals(fullyQualifiedName)) {
+						return t.type;
+					}
+				}
+			}
+		}
+		return null;
+	}
+
+	@Override
 	public boolean isNumber(TypeMirror type) {
 		return org.jsweet.transpiler.util.Util.isNumber(type);
 	}
@@ -133,5 +182,29 @@ public class UtilSupport implements Util {
 	public String getRelativePath(String fromPath, String toPath) {
 		return org.jsweet.transpiler.util.Util.getRelativePath(fromPath, toPath);
 	}
-	
+
+	@Override
+	public String getTypeInitialValue(TypeMirror type) {
+		if (type == null) {
+			return "null";
+		}
+		if (isNumber(type)) {
+			return "0";
+		} else if (type.getKind() == TypeKind.BOOLEAN) {
+			return "false";
+		} else if (type.getKind() == TypeKind.VOID) {
+			return null;
+		} else {
+			return "null";
+		}
+	}
+
+	@Override
+	public boolean isInterface(TypeElement type) {
+		if (type instanceof TypeSymbol) {
+			return context.isInterface((TypeSymbol) type);
+		}
+		return false;
+	}
+
 }

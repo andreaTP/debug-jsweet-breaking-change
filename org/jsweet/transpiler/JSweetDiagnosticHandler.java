@@ -70,12 +70,24 @@ public class JSweetDiagnosticHandler extends BasicDiagnosticFormatter {
 				diagnostic.getMessage(locale));
 	}
 
+	private boolean ignoreError(JCDiagnostic diagnostic) {
+		if (context.options.isIgnoreJavaErrors()) {
+			return true;
+		}
+		if (context.options.isIgnoreJavaFileNameError()
+				&& "compiler.err.class.public.should.be.in.file".equals(diagnostic.getCode())) {
+			return true;
+		}
+		return false;
+	}
+
 	@Override
 	public String format(JCDiagnostic diagnostic, Locale locale) {
 		if (diagnostic.getKind() == Kind.ERROR) {
-			if (!(context.options.isIgnoreJavaFileNameError()
-					&& "compiler.err.class.public.should.be.in.file".equals(diagnostic.getCode()))) {
+			if (!ignoreError(diagnostic)) {
 				reportJavaError(diagnostic, locale);
+			} else {
+				return "";
 			}
 		}
 		switch (diagnostic.getKind()) {
